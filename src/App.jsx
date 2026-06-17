@@ -5,6 +5,7 @@ const BASE_URL = 'https://barrigarest.wcaquino.me'
 const INITIAL_HEADERS = {
   'Content-Type': 'application/json',
 }
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 const lessons = [
   {
@@ -67,6 +68,7 @@ const methodHints = {
   POST: 'POST cria dados ou executa uma acao. O body costuma carregar as informacoes novas.',
   PUT: 'PUT atualiza dados existentes. A URL aponta para o recurso e o body leva a nova versao.',
   DELETE: 'DELETE remove dados. A URL precisa identificar exatamente o recurso.',
+  PATCH: 'PATCH atualiza parte de um recurso. Use quando a API aceitar alteracoes parciais.',
 }
 
 const statusHints = {
@@ -104,14 +106,21 @@ function isSigninUrl(requestUrl) {
   }
 }
 
-function buildHeaders(headersText, token, requestUrl) {
-  const headers = tryParseJson(headersText, {})
+function normalizeRequestInput(currentMethod, requestUrl) {
+  const trimmedUrl = requestUrl.trim()
+  const methodUrlMatch = trimmedUrl.match(/^(GET|POST|PUT|PATCH|DELETE)\s+(.+)$/i)
 
-  if (token.trim() && !isSigninUrl(requestUrl)) {
-    headers.Authorization = `JWT ${token.trim()}`
+  if (!methodUrlMatch) {
+    return {
+      method: currentMethod,
+      url: trimmedUrl,
+    }
   }
 
-  return headers
+  return {
+    method: methodUrlMatch[1].toUpperCase(),
+    url: methodUrlMatch[2].trim(),
+  }
 }
 
 function getStatusHint(status) {
@@ -130,7 +139,291 @@ function getExpectedMessage(response, lesson) {
   return `Esperado neste desafio: ${lesson.expectedStatus}. Recebido: ${response.status}.`
 }
 
+function getHistoryPath(item) {
+  try {
+    return new URL(item.url).pathname
+  } catch {
+    return item.url
+  }
+}
+
+function applyAuthorizationHeader(headers, token, authScheme, requestUrl) {
+  if (!token.trim() || authScheme === 'none' || isSigninUrl(requestUrl)) {
+    return headers
+  }
+
+  if (authScheme === 'raw') {
+    headers.Authorization = token.trim()
+    return headers
+  }
+
+  headers.Authorization = `${authScheme} ${token.trim()}`
+  return headers
+}
+
+async function executeRequest({ method, url, headersText, bodyText, token, authScheme, useProxy = false }) {
+  const request = normalizeRequestInput(method, url)
+  const headers = applyAuthorizationHeader(
+    tryParseJson(headersText, {}),
+    token,
+    authScheme,
+    request.url,
+  )
+  const hasBody = !['GET', 'DELETE'].includes(request.method) && bodyText.trim()
+  const options = {
+    method: request.method,
+    headers,
+  }
+
+  if (hasBody) {
+    options.body = JSON.stringify(tryParseJson(bodyText, {}))
+  }
+
+  const startedAt = performance.now()
+
+  if (useProxy) {
+    const proxyResult = await fetch('/api/proxy-public', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        method: request.method,
+        url: request.url,
+        headers,
+        body: hasBody ? tryParseJson(bodyText, {}) : null,
+      }),
+    })
+    const proxyPayload = await proxyResult.json()
+
+    if (!proxyPayload.ok) {
+      throw new Error(proxyPayload.error || 'Nao foi possivel enviar a requisicao publica.')
+    }
+
+    return {
+      method: request.method,
+      url: request.url,
+      status: proxyPayload.response.status,
+      statusText: proxyPayload.response.statusText,
+      duration: proxyPayload.duration || Math.round(performance.now() - startedAt),
+      body: proxyPayload.response.body,
+    }
+  }
+
+  const result = await fetch(request.url, options)
+  const contentType = result.headers.get('content-type') || ''
+  const rawText = await result.text()
+  const parsedBody = contentType.includes('application/json') && rawText
+    ? JSON.parse(rawText)
+    : rawText
+  const duration = Math.round(performance.now() - startedAt)
+
+  return {
+    method: request.method,
+    url: request.url,
+    status: result.status,
+    statusText: result.statusText,
+    duration,
+    body: parsedBody,
+  }
+}
+
+function RequestResponsePanel({
+  bodyText,
+  emptyText,
+  error,
+  headersText,
+  history,
+  isSending,
+  method,
+  methodHint,
+  onClearHistory,
+  onSubmit,
+  onBodyChange,
+  onHeadersChange,
+  onMethodChange,
+  onTokenChange,
+  onUrlChange,
+  onAuthSchemeChange,
+  response,
+  selectedLesson,
+  token,
+  authScheme,
+  tokenHelp,
+  url,
+}) {
+  return (
+    <>
+      <form autoComplete="off" className="request-panel" onSubmit={onSubmit}>
+        <div className="panel-heading">
+          <p className="eyebrow">Requisicao</p>
+          <h2>{selectedLesson?.title || 'Validador publico'}</h2>
+          <p>{selectedLesson?.goal || 'Envie chamadas para qualquer URL publica que aceite requisicoes do navegador.'}</p>
+        </div>
+
+        <div className="request-line">
+          <select value={method} onChange={(event) => onMethodChange(event.target.value)}>
+            {METHODS.map((item) => (
+              <option key={item}>{item}</option>
+            ))}
+          </select>
+          <input
+            aria-label="URL da API"
+            onChange={(event) => onUrlChange(event.target.value)}
+            placeholder="https://api.exemplo.com/recurso"
+            value={url}
+          />
+          <button disabled={isSending} type="submit">
+            {isSending ? 'Enviando...' : 'Enviar'}
+          </button>
+        </div>
+
+        <p className="method-hint">{methodHint}</p>
+
+        <div className="editor-grid">
+          <div className={`auth-fields ${onAuthSchemeChange ? '' : 'single'}`}>
+            <label className="token-field">
+              <span>Token</span>
+              <input
+                autoComplete="off"
+                name="api-lab-token"
+                onChange={(event) => onTokenChange(event.target.value)}
+                placeholder="Opcional. Pode ser gerado pela autenticacao."
+                value={token}
+              />
+              <small>{tokenHelp}</small>
+            </label>
+
+            {onAuthSchemeChange && (
+              <label className="token-scheme-field">
+                Tipo do token
+                <select
+                  onChange={(event) => onAuthSchemeChange(event.target.value)}
+                  value={authScheme}
+                >
+                  <option value="JWT">JWT</option>
+                  <option value="Bearer">Bearer</option>
+                  <option value="raw">Header completo</option>
+                  <option value="none">Nao enviar</option>
+                </select>
+                <small>Define como o header Authorization sera enviado.</small>
+              </label>
+            )}
+          </div>
+
+          <label className="headers-editor">
+            Headers JSON
+            <textarea
+              onChange={(event) => onHeadersChange(event.target.value)}
+              spellCheck="false"
+              value={headersText}
+            />
+          </label>
+
+          <label className="body-editor">
+            Body JSON
+            <textarea
+              disabled={method === 'GET' || method === 'DELETE'}
+              onChange={(event) => onBodyChange(event.target.value)}
+              placeholder="GET e DELETE geralmente nao precisam de body"
+              spellCheck="false"
+              value={bodyText}
+            />
+          </label>
+        </div>
+      </form>
+
+      <ResponsePanel
+        emptyText={emptyText}
+        error={error}
+        history={history}
+        onClearHistory={onClearHistory}
+        response={response}
+        selectedLesson={selectedLesson}
+      />
+    </>
+  )
+}
+
+function ResponsePanel({ emptyText, error, history, onClearHistory, response, selectedLesson }) {
+  return (
+    <aside className="response-panel" aria-label="Resposta da API">
+      <div className="panel-heading">
+        <p className="eyebrow">Retorno</p>
+        <h2>Resposta da API</h2>
+      </div>
+
+      {error && (
+        <div className="feedback error">
+          <strong>Erro ao enviar</strong>
+          <p>{error}</p>
+        </div>
+      )}
+
+      {!error && !response && (
+        <div className="empty-state">
+          <strong>Pronto para testar</strong>
+          <p>{emptyText}</p>
+        </div>
+      )}
+
+      {response && (
+        <div className="response-result">
+          <div className="status-row">
+            <span className={response.status < 400 ? 'status ok' : 'status fail'}>
+              {response.status} {response.statusText}
+            </span>
+            <span>{response.duration} ms</span>
+          </div>
+          {getExpectedMessage(response, selectedLesson) && (
+            <p
+              className={
+                response.status === selectedLesson.expectedStatus
+                  ? 'challenge-check ok'
+                  : 'challenge-check fail'
+              }
+            >
+              {getExpectedMessage(response, selectedLesson)}
+            </p>
+          )}
+          <p className="status-hint">{getStatusHint(response.status)}</p>
+          <pre>{formatJson(response.body) || 'Sem conteudo no corpo da resposta.'}</pre>
+        </div>
+      )}
+
+      <div className="history">
+        <div className="history-heading">
+          <h3>Historico</h3>
+          <button
+            disabled={history.length === 0}
+            onClick={onClearHistory}
+            type="button"
+          >
+            Limpar
+          </button>
+        </div>
+        {history.length === 0 ? (
+          <p>Nenhuma chamada enviada ainda.</p>
+        ) : (
+          <ol>
+            {history.map((item, index) => (
+              <li key={`${item.method}-${item.url}-${index}`}>
+                <span className={`method-pill ${item.method.toLowerCase()}`}>
+                  {item.method}
+                </span>
+                <span>{item.status}</span>
+                <small>{getHistoryPath(item)}</small>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </aside>
+  )
+}
+
 function App() {
+  const [activeTab, setActiveTab] = useState('guided')
   const [selectedLessonId, setSelectedLessonId] = useState(lessons[0].id)
   const [method, setMethod] = useState('POST')
   const [url, setUrl] = useState(`${BASE_URL}/signin`)
@@ -141,6 +434,19 @@ function App() {
   const [history, setHistory] = useState([])
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState('')
+  const [publicMethod, setPublicMethod] = useState('GET')
+  const [publicUrl, setPublicUrl] = useState('')
+  const [publicHeadersText, setPublicHeadersText] = useState(formatJson(INITIAL_HEADERS))
+  const [publicBodyText, setPublicBodyText] = useState('')
+  const [publicAuthUrl, setPublicAuthUrl] = useState('')
+  const [publicAuthMethod, setPublicAuthMethod] = useState('POST')
+  const [publicAuthBodyText, setPublicAuthBodyText] = useState('')
+  const [publicToken, setPublicToken] = useState('')
+  const [publicAuthScheme, setPublicAuthScheme] = useState('JWT')
+  const [publicResponse, setPublicResponse] = useState(null)
+  const [publicHistory, setPublicHistory] = useState([])
+  const [isPublicSending, setIsPublicSending] = useState(false)
+  const [publicError, setPublicError] = useState('')
 
   const selectedLesson = useMemo(
     () => lessons.find((lesson) => lesson.id === selectedLessonId),
@@ -162,46 +468,86 @@ function App() {
     setError('')
     setResponse(null)
 
-    const startedAt = performance.now()
-
     try {
-      const headers = buildHeaders(headersText, token, url)
-      const hasBody = !['GET', 'DELETE'].includes(method) && bodyText.trim()
-      const options = {
-        method,
-        headers,
-      }
+      const request = normalizeRequestInput(method, url)
+      setMethod(request.method)
+      setUrl(request.url)
 
-      if (hasBody) {
-        options.body = JSON.stringify(tryParseJson(bodyText, {}))
-      }
-
-      const result = await fetch(url, options)
-      const contentType = result.headers.get('content-type') || ''
-      const rawText = await result.text()
-      const parsedBody = contentType.includes('application/json') && rawText
-        ? JSON.parse(rawText)
-        : rawText
-      const duration = Math.round(performance.now() - startedAt)
-      const requestResult = {
-        method,
-        url,
-        status: result.status,
-        statusText: result.statusText,
-        duration,
-        body: parsedBody,
-      }
+      const requestResult = await executeRequest({
+        method: request.method,
+        url: request.url,
+        headersText,
+        bodyText,
+        token,
+        authScheme: 'JWT',
+      })
 
       setResponse(requestResult)
       setHistory((items) => [requestResult, ...items].slice(0, 8))
 
-      if (isSigninUrl(url) && parsedBody?.token) {
-        setToken(parsedBody.token)
+      if (isSigninUrl(url) && requestResult.body?.token) {
+        setToken(requestResult.body.token)
       }
     } catch (requestError) {
       setError(requestError.message)
     } finally {
       setIsSending(false)
+    }
+  }
+
+  async function sendPublicRequest(event) {
+    event.preventDefault()
+    setIsPublicSending(true)
+    setPublicError('')
+    setPublicResponse(null)
+
+    try {
+      let nextToken = publicToken
+
+      if (publicAuthUrl.trim()) {
+        const authRequest = normalizeRequestInput(publicAuthMethod, publicAuthUrl)
+        setPublicAuthMethod(authRequest.method)
+        setPublicAuthUrl(authRequest.url)
+
+        const authResult = await executeRequest({
+          method: authRequest.method,
+          url: authRequest.url,
+          headersText: publicHeadersText,
+          bodyText: publicAuthBodyText,
+          token: '',
+          authScheme: 'none',
+          useProxy: true,
+        })
+        const authToken = authResult.body?.token || authResult.body?.access_token || authResult.body?.jwt
+
+        if (!authToken) {
+          throw new Error('Autenticacao enviada, mas nenhum token, access_token ou jwt foi encontrado na resposta.')
+        }
+
+        nextToken = authToken
+        setPublicToken(authToken)
+      }
+
+      const request = normalizeRequestInput(publicMethod, publicUrl)
+      setPublicMethod(request.method)
+      setPublicUrl(request.url)
+
+      const requestResult = await executeRequest({
+        method: request.method,
+        url: request.url,
+        headersText: publicHeadersText,
+        bodyText: publicBodyText,
+        token: nextToken,
+        authScheme: publicAuthScheme,
+        useProxy: true,
+      })
+
+      setPublicResponse(requestResult)
+      setPublicHistory((items) => [requestResult, ...items].slice(0, 8))
+    } catch (requestError) {
+      setPublicError(requestError.message)
+    } finally {
+      setIsPublicSending(false)
     }
   }
 
@@ -215,6 +561,24 @@ function App() {
         <span className="base-url">{BASE_URL}</span>
       </header>
 
+      <nav className="tabs" aria-label="Modos do laboratorio">
+        <button
+          className={activeTab === 'guided' ? 'active' : ''}
+          onClick={() => setActiveTab('guided')}
+          type="button"
+        >
+          Desafios guiados
+        </button>
+        <button
+          className={activeTab === 'public' ? 'active' : ''}
+          onClick={() => setActiveTab('public')}
+          type="button"
+        >
+          URLs publicas
+        </button>
+      </nav>
+
+      {activeTab === 'guided' && (
       <section className="workspace">
         <aside className="lessons-panel" aria-label="Desafios da aula">
           <div className="panel-heading">
@@ -241,144 +605,106 @@ function App() {
           </div>
         </aside>
 
-        <form autoComplete="off" className="request-panel" onSubmit={sendRequest}>
-          <div className="panel-heading">
-            <p className="eyebrow">Requisicao</p>
-            <h2>{selectedLesson?.title}</h2>
-            <p>{selectedLesson?.goal}</p>
-          </div>
+        <RequestResponsePanel
+          bodyText={bodyText}
+          emptyText="Escolha um desafio, ajuste os dados e envie a requisicao."
+          error={error}
+          headersText={headersText}
+          history={history}
+          isSending={isSending}
+          method={method}
+          methodHint={methodHints[method]}
+          onBodyChange={setBodyText}
+          onClearHistory={() => setHistory([])}
+          onHeadersChange={setHeadersText}
+          onMethodChange={setMethod}
+          onSubmit={sendRequest}
+          onTokenChange={setToken}
+          onUrlChange={setUrl}
+          response={response}
+          selectedLesson={selectedLesson}
+          token={token}
+          tokenHelp={
+            token
+              ? 'Token gerado. Ele sera enviado automaticamente nas outras APIs.'
+              : 'Nenhum token gerado ainda.'
+          }
+          url={url}
+        />
+      </section>
+      )}
 
-          <div className="request-line">
-            <select value={method} onChange={(event) => setMethod(event.target.value)}>
-              <option>GET</option>
-              <option>POST</option>
-              <option>PUT</option>
-              <option>DELETE</option>
-            </select>
-            <input
-              aria-label="URL da API"
-              onChange={(event) => setUrl(event.target.value)}
-              value={url}
-            />
-            <button disabled={isSending} type="submit">
-              {isSending ? 'Enviando...' : 'Enviar'}
-            </button>
-          </div>
+      {activeTab === 'public' && (
+        <section className="workspace public-workspace">
+          <aside className="lessons-panel" aria-label="Autenticacao opcional">
+            <div className="panel-heading">
+              <p className="eyebrow">Autenticacao</p>
+              <h2>Login opcional</h2>
+              <p>Use apenas quando a API publica exigir token antes da chamada principal.</p>
+            </div>
 
-          <p className="method-hint">{methodHints[method]}</p>
-
-          <div className="editor-grid">
-            <label className="token-field">
-              <span>Token JWT</span>
+            <label>
+              URL de autenticacao
               <input
-                autoComplete="off"
-                name="api-lab-jwt-token"
-                onChange={(event) => setToken(event.target.value)}
-                placeholder="Vazio ao abrir. Envie o login para gerar automaticamente."
-                value={token}
+                onChange={(event) => setPublicAuthUrl(event.target.value)}
+                placeholder="https://api.exemplo.com/login"
+                value={publicAuthUrl}
               />
-              <small>
-                {token
-                  ? 'Token gerado. Ele sera enviado automaticamente nas outras APIs.'
-                  : 'Nenhum token gerado ainda.'}
-              </small>
             </label>
 
             <label>
-              Headers JSON
-              <textarea
-                onChange={(event) => setHeadersText(event.target.value)}
-                spellCheck="false"
-                value={headersText}
-              />
-            </label>
-
-            <label className="body-editor">
-              Body JSON
-              <textarea
-                disabled={method === 'GET' || method === 'DELETE'}
-                onChange={(event) => setBodyText(event.target.value)}
-                placeholder="GET e DELETE geralmente nao precisam de body"
-                spellCheck="false"
-                value={bodyText}
-              />
-            </label>
-          </div>
-        </form>
-
-        <aside className="response-panel" aria-label="Resposta da API">
-          <div className="panel-heading">
-            <p className="eyebrow">Retorno</p>
-            <h2>Resposta da API</h2>
-          </div>
-
-          {error && (
-            <div className="feedback error">
-              <strong>Erro ao enviar</strong>
-              <p>{error}</p>
-            </div>
-          )}
-
-          {!error && !response && (
-            <div className="empty-state">
-              <strong>Pronto para testar</strong>
-              <p>Escolha um desafio, ajuste os dados e envie a requisicao.</p>
-            </div>
-          )}
-
-          {response && (
-            <div className="response-result">
-              <div className="status-row">
-                <span className={response.status < 400 ? 'status ok' : 'status fail'}>
-                  {response.status} {response.statusText}
-                </span>
-                <span>{response.duration} ms</span>
-              </div>
-              {getExpectedMessage(response, selectedLesson) && (
-                <p
-                  className={
-                    response.status === selectedLesson.expectedStatus
-                      ? 'challenge-check ok'
-                      : 'challenge-check fail'
-                  }
-                >
-                  {getExpectedMessage(response, selectedLesson)}
-                </p>
-              )}
-              <p className="status-hint">{getStatusHint(response.status)}</p>
-              <pre>{formatJson(response.body) || 'Sem conteudo no corpo da resposta.'}</pre>
-            </div>
-          )}
-
-          <div className="history">
-            <div className="history-heading">
-              <h3>Historico</h3>
-              <button
-                disabled={history.length === 0}
-                onClick={() => setHistory([])}
-                type="button"
+              Metodo
+              <select
+                onChange={(event) => setPublicAuthMethod(event.target.value)}
+                value={publicAuthMethod}
               >
-                Limpar
-              </button>
-            </div>
-            {history.length === 0 ? (
-              <p>Nenhuma chamada enviada ainda.</p>
-            ) : (
-              <ol>
-                {history.map((item, index) => (
-                  <li key={`${item.method}-${item.url}-${index}`}>
-                    <span className={`method-pill ${item.method.toLowerCase()}`}>
-                      {item.method}
-                    </span>
-                    <span>{item.status}</span>
-                    <small>{new URL(item.url).pathname}</small>
-                  </li>
+                {METHODS.filter((item) => item !== 'GET' && item !== 'DELETE').map((item) => (
+                  <option key={item}>{item}</option>
                 ))}
-              </ol>
-            )}
-          </div>
-        </aside>
-      </section>
+              </select>
+            </label>
+
+            <label>
+              Body do login
+              <textarea
+                onChange={(event) => setPublicAuthBodyText(event.target.value)}
+                placeholder={'{\n  "email": "usuario@exemplo.com",\n  "senha": "123456"\n}'}
+                spellCheck="false"
+                value={publicAuthBodyText}
+              />
+            </label>
+          </aside>
+
+          <RequestResponsePanel
+            bodyText={publicBodyText}
+            emptyText="Informe uma URL publica, selecione o metodo e envie a requisicao."
+            error={publicError}
+            headersText={publicHeadersText}
+            history={publicHistory}
+            isSending={isPublicSending}
+            method={publicMethod}
+            methodHint={methodHints[publicMethod]}
+            onBodyChange={setPublicBodyText}
+            onClearHistory={() => setPublicHistory([])}
+            onHeadersChange={setPublicHeadersText}
+            onMethodChange={setPublicMethod}
+            onSubmit={sendPublicRequest}
+            onTokenChange={setPublicToken}
+            onUrlChange={setPublicUrl}
+            response={publicResponse}
+            selectedLesson={null}
+            token={publicToken}
+            tokenHelp={
+            publicToken
+                ? `Token pronto. Ele sera enviado como ${publicAuthScheme} na chamada principal.`
+                : 'Preencha manualmente ou use a URL de autenticacao para gerar.'
+            }
+            authScheme={publicAuthScheme}
+            onAuthSchemeChange={setPublicAuthScheme}
+            url={publicUrl}
+          />
+        </section>
+      )}
     </main>
   )
 }
