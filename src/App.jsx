@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import './App.css'
 
-const BASE_URL = 'https://barrigarest.wcaquino.me'
+const BASE_URL = 'https://cadastroprova.netlify.app'
 const INITIAL_HEADERS = {
   'Content-Type': 'application/json',
 }
@@ -9,55 +9,89 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 const lessons = [
   {
-    id: 'signin',
-    title: 'Login e token',
+    id: 'signup',
+    title: 'Cadastrar usuario',
     method: 'POST',
-    endpoint: '/signin',
-    goal: 'Enviar email e senha para receber um token de acesso.',
-    expectedStatus: 200,
+    endpoint: '/api/auth/cadastro',
+    goal: 'Criar uma conta de teste. Troque o email antes de enviar para manter o cadastro unico.',
+    expectedStatus: 201,
     body: {
-      email: 'senaiteste@gmail.com',
-      senha: '123456',
-      redirecionar: false,
+      name: 'Aluno Teste API',
+      email: 'aluno.seu.nome@example.com',
+      password: 'SenhaAula123!',
     },
   },
   {
-    id: 'accounts-list',
-    title: 'Listar contas',
+    id: 'login',
+    title: 'Login e token',
+    method: 'POST',
+    endpoint: '/api/auth/login',
+    goal: 'Autenticar uma conta e guardar o access_token usado nos proximos desafios.',
+    expectedStatus: 200,
+    body: {
+      email: 'teste@email.com',
+      password: 'ja98ch70',
+    },
+  },
+  {
+    id: 'registration-status',
+    title: 'Consultar cadastro',
     method: 'GET',
-    endpoint: '/contas',
-    goal: 'Buscar recursos existentes usando uma chamada autenticada.',
+    endpoint: '/api/auth/cadastro',
+    goal: 'Confirmar, com o token Bearer, se o cadastro autenticado esta ativo.',
     expectedStatus: 200,
     body: null,
   },
   {
-    id: 'account-create',
-    title: 'Criar conta',
+    id: 'tasks-list',
+    title: 'Listar tarefas',
+    method: 'GET',
+    endpoint: '/api/tarefas',
+    goal: 'Buscar somente as tarefas pertencentes ao usuario autenticado.',
+    expectedStatus: 200,
+    body: null,
+  },
+  {
+    id: 'task-create',
+    title: 'Criar tarefa',
     method: 'POST',
-    endpoint: '/contas',
-    goal: 'Criar um novo recurso enviando dados no corpo da requisicao.',
+    endpoint: '/api/tarefas',
+    goal: 'Criar uma tarefa. O ID retornado sera reutilizado automaticamente nos desafios seguintes.',
     expectedStatus: 201,
     body: {
-      nome: 'Conta Aula API',
+      titulo: 'Preparar aula de API',
+      descricao: 'Criar os cenarios de validacao',
+      concluida: false,
     },
   },
   {
-    id: 'account-update',
-    title: 'Editar conta',
+    id: 'task-find',
+    title: 'Buscar tarefa por ID',
+    method: 'GET',
+    endpoint: '/api/tarefas/ID_DA_TAREFA',
+    goal: 'Buscar uma tarefa especifica usando o ID devolvido na criacao.',
+    expectedStatus: 200,
+    body: null,
+  },
+  {
+    id: 'task-update',
+    title: 'Editar tarefa',
     method: 'PUT',
-    endpoint: '/contas/ID_DA_CONTA',
-    goal: 'Alterar um recurso existente usando o identificador na URL.',
+    endpoint: '/api/tarefas/ID_DA_TAREFA',
+    goal: 'Substituir todos os campos editaveis de uma tarefa existente.',
     expectedStatus: 200,
     body: {
-      nome: 'Conta Aula API Atualizada',
+      titulo: 'Aula de API preparada',
+      descricao: 'Cenarios criados e revisados',
+      concluida: true,
     },
   },
   {
-    id: 'account-delete',
-    title: 'Excluir conta',
+    id: 'task-delete',
+    title: 'Excluir tarefa',
     method: 'DELETE',
-    endpoint: '/contas/ID_DA_CONTA',
-    goal: 'Remover um recurso existente pelo seu identificador.',
+    endpoint: '/api/tarefas/ID_DA_TAREFA',
+    goal: 'Remover a tarefa pelo ID. A API confirma a exclusao sem retornar JSON.',
     expectedStatus: 204,
     body: null,
   },
@@ -79,7 +113,12 @@ const statusHints = {
   401: 'Nao autorizado. Verifique login, token e header Authorization.',
   403: 'Acesso negado. O usuario autenticado nao tem permissao para esta acao.',
   404: 'Nao encontrado. Confira o endpoint e o ID usado na URL.',
+  409: 'Conflito. O cadastro ou outro valor unico ja existe.',
+  415: 'Tipo de conteudo nao aceito. Envie o header Content-Type como application/json.',
+  422: 'Dados invalidos. Revise os campos indicados no corpo da resposta.',
+  429: 'Muitas tentativas. Aguarde antes de enviar uma nova requisicao.',
   500: 'Erro interno da API. A requisicao chegou, mas o servidor falhou.',
+  503: 'Servico indisponivel. A autenticacao ou o banco pode estar temporariamente fora do ar.',
 }
 
 function formatJson(value) {
@@ -98,9 +137,9 @@ function tryParseJson(text, fallback) {
   return JSON.parse(text)
 }
 
-function isSigninUrl(requestUrl) {
+function isLoginUrl(requestUrl) {
   try {
-    return new URL(requestUrl).pathname === '/signin'
+    return new URL(requestUrl).pathname === '/api/auth/login'
   } catch {
     return false
   }
@@ -148,7 +187,7 @@ function getHistoryPath(item) {
 }
 
 function applyAuthorizationHeader(headers, token, authScheme, requestUrl) {
-  if (!token.trim() || authScheme === 'none' || isSigninUrl(requestUrl)) {
+  if (!token.trim() || authScheme === 'none' || isLoginUrl(requestUrl)) {
     return headers
   }
 
@@ -426,7 +465,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('guided')
   const [selectedLessonId, setSelectedLessonId] = useState(lessons[0].id)
   const [method, setMethod] = useState('POST')
-  const [url, setUrl] = useState(`${BASE_URL}/signin`)
+  const [url, setUrl] = useState(`${BASE_URL}${lessons[0].endpoint}`)
   const [token, setToken] = useState('')
   const [headersText, setHeadersText] = useState(formatJson(INITIAL_HEADERS))
   const [bodyText, setBodyText] = useState(formatJson(lessons[0].body))
@@ -434,6 +473,7 @@ function App() {
   const [history, setHistory] = useState([])
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState('')
+  const [lastCreatedTaskId, setLastCreatedTaskId] = useState('')
   const [publicMethod, setPublicMethod] = useState('GET')
   const [publicUrl, setPublicUrl] = useState('')
   const [publicHeadersText, setPublicHeadersText] = useState(formatJson(INITIAL_HEADERS))
@@ -442,7 +482,7 @@ function App() {
   const [publicAuthMethod, setPublicAuthMethod] = useState('POST')
   const [publicAuthBodyText, setPublicAuthBodyText] = useState('')
   const [publicToken, setPublicToken] = useState('')
-  const [publicAuthScheme, setPublicAuthScheme] = useState('JWT')
+  const [publicAuthScheme, setPublicAuthScheme] = useState('Bearer')
   const [publicResponse, setPublicResponse] = useState(null)
   const [publicHistory, setPublicHistory] = useState([])
   const [isPublicSending, setIsPublicSending] = useState(false)
@@ -456,7 +496,10 @@ function App() {
   function applyLesson(lesson) {
     setSelectedLessonId(lesson.id)
     setMethod(lesson.method)
-    setUrl(`${BASE_URL}${lesson.endpoint}`)
+    const endpoint = lastCreatedTaskId
+      ? lesson.endpoint.replace('ID_DA_TAREFA', lastCreatedTaskId)
+      : lesson.endpoint
+    setUrl(`${BASE_URL}${endpoint}`)
     setBodyText(formatJson(lesson.body))
     setError('')
     setResponse(null)
@@ -479,14 +522,23 @@ function App() {
         headersText,
         bodyText,
         token,
-        authScheme: 'JWT',
+        authScheme: 'Bearer',
+        useProxy: true,
       })
 
       setResponse(requestResult)
       setHistory((items) => [requestResult, ...items].slice(0, 8))
 
-      if (isSigninUrl(url) && requestResult.body?.token) {
-        setToken(requestResult.body.token)
+      if (isLoginUrl(request.url) && requestResult.body?.access_token) {
+        setToken(requestResult.body.access_token)
+      }
+
+      if (
+        request.method === 'POST'
+        && new URL(request.url).pathname === '/api/tarefas'
+        && requestResult.body?.data?.id
+      ) {
+        setLastCreatedTaskId(requestResult.body.data.id)
       }
     } catch (requestError) {
       setError(requestError.message)
@@ -556,7 +608,7 @@ function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Laboratorio REST</p>
-          <h1>API Lab para aulas de sistemas</h1>
+          <h1>API Lab do CadastroPro</h1>
         </div>
         <span className="base-url">{BASE_URL}</span>
       </header>
@@ -626,8 +678,8 @@ function App() {
           token={token}
           tokenHelp={
             token
-              ? 'Token gerado. Ele sera enviado automaticamente nas outras APIs.'
-              : 'Nenhum token gerado ainda.'
+              ? 'Access token gerado. Ele sera enviado automaticamente como Bearer.'
+              : 'Faca o desafio de login para gerar o access token.'
           }
           url={url}
         />
@@ -668,7 +720,7 @@ function App() {
               Body do login
               <textarea
                 onChange={(event) => setPublicAuthBodyText(event.target.value)}
-                placeholder={'{\n  "email": "usuario@exemplo.com",\n  "senha": "123456"\n}'}
+                placeholder={'{\n  "email": "usuario@exemplo.com",\n  "password": "SenhaAula123!"\n}'}
                 spellCheck="false"
                 value={publicAuthBodyText}
               />

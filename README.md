@@ -1,9 +1,10 @@
-# Laboratorio REST
+# Laboratorio REST do CadastroPro
 
-Aplicacao didatica em React para alunos praticarem requisicoes HTTP usando a API:
+Aplicacao didatica em React para alunos praticarem requisicoes HTTP usando as APIs de
+autenticacao e tarefas do CadastroPro:
 
 ```text
-https://barrigarest.wcaquino.me
+https://cadastroprova.netlify.app
 ```
 
 ## Rodar o projeto
@@ -21,16 +22,25 @@ http://localhost:5173/
 
 ## Fluxo sugerido em aula
 
-1. Enviar `POST /signin` com credenciais validas.
-2. Observar status `200` e guardar o token retornado.
-3. Usar o token para testar `GET`, `POST`, `PUT` e `DELETE` em `/contas`.
+1. Opcionalmente, enviar `POST /api/auth/cadastro` para criar uma conta de teste.
+2. Enviar `POST /api/auth/login` com credenciais validas.
+3. Observar o status `200` e o `access_token` retornado.
+4. Consultar o proprio cadastro com `GET /api/auth/cadastro`.
+5. Usar o token Bearer para testar `GET`, `POST`, `PUT` e `DELETE` em `/api/tarefas`.
+
+Ao criar uma tarefa, o laboratorio guarda o ID retornado e o preenche automaticamente nos
+desafios de busca, edicao e exclusao. As chamadas guiadas passam pelo proxy local do Vite,
+pois a API publicada nao libera requisicoes diretas de outras origens no navegador.
 
 ## Credenciais de exemplo
 
 ```json
 {
-  "email": "senaiteste@gmail.com",
-  "senha": "123456",
-  "redirecionar": false
+  "email": "teste@email.com",
+  "password": "ja98ch70"
 }
 ```
+
+Use essa conta apenas para o laboratorio. Tarefas criadas nela sao compartilhadas por quem
+utilizar as mesmas credenciais. Para isolar seus dados, cadastre outra conta e use o novo
+email e senha no desafio de login.
