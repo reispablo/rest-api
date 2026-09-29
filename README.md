@@ -29,8 +29,9 @@ http://localhost:5173/
 5. Usar o token Bearer para testar `GET`, `POST`, `PUT` e `DELETE` em `/api/tarefas`.
 
 Ao criar uma tarefa, o laboratorio guarda o ID retornado e o preenche automaticamente nos
-desafios de busca, edicao e exclusao. As chamadas guiadas passam pelo proxy local do Vite,
-pois a API publicada nao libera requisicoes diretas de outras origens no navegador.
+desafios de busca, edicao e exclusao. Durante o desenvolvimento, as chamadas guiadas passam
+pelo proxy local do Vite. No build publicado, o navegador chama diretamente a API, que
+libera essas rotas para uso didatico por meio de CORS.
 
 ## Credenciais de exemplo
 

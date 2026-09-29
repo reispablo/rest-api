@@ -233,7 +233,14 @@ async function executeRequest({ method, url, headersText, bodyText, token, authS
         body: hasBody ? tryParseJson(bodyText, {}) : null,
       }),
     })
-    const proxyPayload = await proxyResult.json()
+    const proxyText = await proxyResult.text()
+    let proxyPayload
+
+    try {
+      proxyPayload = JSON.parse(proxyText)
+    } catch {
+      throw new Error('O proxy local nao esta disponivel. Recarregue o site publicado e tente novamente.')
+    }
 
     if (!proxyPayload.ok) {
       throw new Error(proxyPayload.error || 'Nao foi possivel enviar a requisicao publica.')
@@ -523,7 +530,7 @@ function App() {
         bodyText,
         token,
         authScheme: 'Bearer',
-        useProxy: true,
+        useProxy: import.meta.env.DEV,
       })
 
       setResponse(requestResult)
