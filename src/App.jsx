@@ -18,7 +18,7 @@ const lessons = [
     body: {
       name: 'Aluno Teste API',
       email: 'aluno.seu.nome@example.com',
-      password: 'SenhaAula123!',
+      password: 'a12345678',
     },
   },
   {
