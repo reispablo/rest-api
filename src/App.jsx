@@ -6,6 +6,7 @@ const INITIAL_HEADERS = {
   'Content-Type': 'application/json',
 }
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+const STOCK_SKU = `AULA-${Date.now()}`
 
 const lessons = [
   {
@@ -43,55 +44,65 @@ const lessons = [
     body: null,
   },
   {
-    id: 'tasks-list',
-    title: 'Listar tarefas',
+    id: 'stock-list',
+    title: 'Listar itens de estoque',
     method: 'GET',
-    endpoint: '/api/tarefas',
-    goal: 'Buscar somente as tarefas pertencentes ao usuario autenticado.',
+    endpoint: '/api/estoque',
+    goal: 'Buscar somente os itens de estoque pertencentes ao usuario autenticado.',
     expectedStatus: 200,
     body: null,
   },
   {
-    id: 'task-create',
-    title: 'Criar tarefa',
+    id: 'stock-create',
+    title: 'Cadastrar item de estoque',
     method: 'POST',
-    endpoint: '/api/tarefas',
-    goal: 'Criar uma tarefa. O ID retornado sera reutilizado automaticamente nos desafios seguintes.',
+    endpoint: '/api/estoque',
+    goal: 'Cadastrar um item. O SKU e unico e o ID retornado sera usado nos proximos desafios.',
     expectedStatus: 201,
     body: {
-      titulo: 'Preparar aula de API',
-      descricao: 'Criar os cenarios de validacao',
-      concluida: false,
+      sku: STOCK_SKU,
+      nome: 'Item de estoque da aula',
+      unidade_medida: 'UN',
+      valor_unitario: 10,
+      quantidade: 10,
+      quantidade_minima: 2,
+      localizacao: 'A-01-01',
+      ativo: true,
     },
   },
   {
-    id: 'task-find',
-    title: 'Buscar tarefa por ID',
+    id: 'stock-find',
+    title: 'Buscar item por ID',
     method: 'GET',
-    endpoint: '/api/tarefas/ID_DA_TAREFA',
-    goal: 'Buscar uma tarefa especifica usando o ID devolvido na criacao.',
+    endpoint: '/api/estoque/ID_DO_ITEM',
+    goal: 'Buscar um item de estoque especifico usando o ID devolvido no cadastro.',
     expectedStatus: 200,
     body: null,
   },
   {
-    id: 'task-update',
-    title: 'Editar tarefa',
+    id: 'stock-update',
+    title: 'Alterar item de estoque',
     method: 'PUT',
-    endpoint: '/api/tarefas/ID_DA_TAREFA',
-    goal: 'Substituir todos os campos editaveis de uma tarefa existente.',
+    endpoint: '/api/estoque/ID_DO_ITEM',
+    goal: 'Substituir todos os campos editaveis de um item de estoque existente.',
     expectedStatus: 200,
     body: {
-      titulo: 'Aula de API preparada',
-      descricao: 'Cenarios criados e revisados',
-      concluida: true,
+      sku: STOCK_SKU,
+      nome: 'Item de estoque atualizado',
+      unidade_medida: 'UN',
+      valor_unitario: 12.5,
+      quantidade: 20,
+      quantidade_minima: 5,
+      localizacao: 'B-02-01',
+      ativo: true,
     },
   },
   {
-    id: 'task-delete',
-    title: 'Excluir tarefa',
+    id: 'stock-delete',
+    title: 'Excluir item de estoque',
     method: 'DELETE',
-    endpoint: '/api/tarefas/ID_DA_TAREFA',
-    goal: 'Remover a tarefa pelo ID. A API confirma a exclusao sem retornar JSON.',
+    endpoint: '/api/estoque/ID_DO_ITEM',
+    goal: 'Remover o item pelo ID. A API confirma a exclusao sem retornar JSON.',
     expectedStatus: 204,
     body: null,
   },
@@ -480,7 +491,7 @@ function App() {
   const [history, setHistory] = useState([])
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState('')
-  const [lastCreatedTaskId, setLastCreatedTaskId] = useState('')
+  const [lastCreatedStockId, setLastCreatedStockId] = useState('')
   const [publicMethod, setPublicMethod] = useState('GET')
   const [publicUrl, setPublicUrl] = useState('')
   const [publicHeadersText, setPublicHeadersText] = useState(formatJson(INITIAL_HEADERS))
@@ -503,8 +514,8 @@ function App() {
   function applyLesson(lesson) {
     setSelectedLessonId(lesson.id)
     setMethod(lesson.method)
-    const endpoint = lastCreatedTaskId
-      ? lesson.endpoint.replace('ID_DA_TAREFA', lastCreatedTaskId)
+    const endpoint = lastCreatedStockId
+      ? lesson.endpoint.replace('ID_DO_ITEM', lastCreatedStockId)
       : lesson.endpoint
     setUrl(`${BASE_URL}${endpoint}`)
     setBodyText(formatJson(lesson.body))
@@ -542,10 +553,10 @@ function App() {
 
       if (
         request.method === 'POST'
-        && new URL(request.url).pathname === '/api/tarefas'
+        && new URL(request.url).pathname === '/api/estoque'
         && requestResult.body?.data?.id
       ) {
-        setLastCreatedTaskId(requestResult.body.data.id)
+        setLastCreatedStockId(requestResult.body.data.id)
       }
     } catch (requestError) {
       setError(requestError.message)
